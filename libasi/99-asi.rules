@@ -1,0 +1,2 @@
+# All ASI Cameras and filter wheels
+SUBSYSTEMS=="usb", ATTR{idVendor}=="03c3", MODE="0666" 
