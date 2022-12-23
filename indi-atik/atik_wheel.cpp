@@ -27,21 +27,30 @@
 #include <math.h>
 #include <unistd.h>
 #include <string.h>
-#include <deque>
-#include <memory>
 
 #define TEMP_TIMER_MS           1000 /* Temperature polling time (ms) */
 #define MAX_DEVICES             4    /* Max device filterWheelCount */
 
-static class Loader
+static int iAvailablefilterWheelsCount;
+static ATIKWHEEL *filterWheels[MAX_DEVICES];
+
+static void cleanup()
 {
-    std::deque<std::unique_ptr<ATIKWHEEL>> filterWheels;
-public:
-    Loader()
+    for (int i = 0; i < iAvailablefilterWheelsCount; i++)
     {
-        int iAvailablefilterWheelsCount = MAX_DEVICES;
+        delete filterWheels[i];
+    }
+}
+
+void ATIK_WHEEL_ISInit()
+{
+    static bool isInit = false;
+    if (!isInit)
+    {
+        iAvailablefilterWheelsCount = 0;
         std::vector<std::string> filterWheelNames;
 
+        iAvailablefilterWheelsCount = MAX_DEVICES;
         for (int i = 0; i < iAvailablefilterWheelsCount; i++)
         {
             // We only do filterWheels in this driver.
@@ -69,18 +78,119 @@ public:
                 filterWheelName = "Atik " + std::string(fwName) + " " +
                                   std::to_string(static_cast<int>(std::count(filterWheelNames.begin(), filterWheelNames.end(), fwName)) + 1);
 
-            filterWheels.push_back(std::unique_ptr<ATIKWHEEL>(new ATIKWHEEL(filterWheelName, i)));
+            filterWheels[i] = new ATIKWHEEL(filterWheelName, i);
             filterWheelNames.push_back(fwName);
         }
-    }
-} loader;
 
-ATIKWHEEL::ATIKWHEEL(const std::string &filterWheelName, int id)
-    : FilterWheel()
-    , m_iDevice(id)
+        if (filterWheelNames.empty())
+        {
+            iAvailablefilterWheelsCount = 0;
+            return;
+        }
+        else
+            iAvailablefilterWheelsCount = filterWheelNames.size();
+
+        atexit(cleanup);
+        isInit = true;
+    }
+}
+
+void ISGetProperties(const char *dev)
+{
+    ATIK_WHEEL_ISInit();
+
+    if (iAvailablefilterWheelsCount == 0)
+    {
+        IDMessage(nullptr, "No Atik filter wheels detected. Power on?");
+        return;
+    }
+
+    for (int i = 0; i < iAvailablefilterWheelsCount; i++)
+    {
+        ATIKWHEEL *filterWheel = filterWheels[i];
+        if (dev == nullptr || !strcmp(dev, filterWheel->name))
+        {
+            filterWheel->ISGetProperties(dev);
+            if (dev != nullptr)
+                break;
+        }
+    }
+}
+
+void ISNewSwitch(const char *dev, const char *name, ISState *states, char *names[], int num)
+{
+    ATIK_WHEEL_ISInit();
+    for (int i = 0; i < iAvailablefilterWheelsCount; i++)
+    {
+        ATIKWHEEL *filterWheel = filterWheels[i];
+        if (dev == nullptr || !strcmp(dev, filterWheel->name))
+        {
+            filterWheel->ISNewSwitch(dev, name, states, names, num);
+            if (dev != nullptr)
+                break;
+        }
+    }
+}
+
+void ISNewText(const char *dev, const char *name, char *texts[], char *names[], int num)
+{
+    ATIK_WHEEL_ISInit();
+    for (int i = 0; i < iAvailablefilterWheelsCount; i++)
+    {
+        ATIKWHEEL *filterWheel = filterWheels[i];
+        if (dev == nullptr || !strcmp(dev, filterWheel->name))
+        {
+            filterWheel->ISNewText(dev, name, texts, names, num);
+            if (dev != nullptr)
+                break;
+        }
+    }
+}
+
+void ISNewNumber(const char *dev, const char *name, double values[], char *names[], int num)
+{
+    ATIK_WHEEL_ISInit();
+    for (int i = 0; i < iAvailablefilterWheelsCount; i++)
+    {
+        ATIKWHEEL *filterWheel = filterWheels[i];
+        if (dev == nullptr || !strcmp(dev, filterWheel->name))
+        {
+            filterWheel->ISNewNumber(dev, name, values, names, num);
+            if (dev != nullptr)
+                break;
+        }
+    }
+}
+
+void ISNewBLOB(const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[],
+               char *names[], int n)
+{
+    INDI_UNUSED(dev);
+    INDI_UNUSED(name);
+    INDI_UNUSED(sizes);
+    INDI_UNUSED(blobsizes);
+    INDI_UNUSED(blobs);
+    INDI_UNUSED(formats);
+    INDI_UNUSED(names);
+    INDI_UNUSED(n);
+}
+
+void ISSnoopDevice(XMLEle *root)
+{
+    ATIK_WHEEL_ISInit();
+
+    for (int i = 0; i < iAvailablefilterWheelsCount; i++)
+    {
+        ATIKWHEEL *filterWheel = filterWheels[i];
+        filterWheel->ISSnoopDevice(root);
+    }
+}
+
+ATIKWHEEL::ATIKWHEEL(std::string filterWheelName, int id) : FilterWheel(), m_iDevice(id)
 {
     setVersion(ATIK_VERSION_MAJOR, ATIK_VERSION_MINOR);
-    setDeviceName(filterWheelName.c_str());
+    strncpy(this->name, filterWheelName.c_str(), MAXINDIDEVICE);
+    setDeviceName(this->name);
 }
 
 const char *ATIKWHEEL::getDefaultName()
@@ -99,13 +209,13 @@ bool ATIKWHEEL::initProperties()
 
 bool ATIKWHEEL::Connect()
 {
-    LOGF_DEBUG("Attempting to open %s...", getDeviceName());
+    LOGF_DEBUG("Attempting to open %s...", name);
 
     hWheel = ArtemisEFWConnect(m_iDevice);
 
     if (hWheel == nullptr)
     {
-        LOGF_ERROR("Failed to connected to %s", getDeviceName());
+        LOGF_ERROR("Failed to connected to %s", name);
         return false;
     }
 
