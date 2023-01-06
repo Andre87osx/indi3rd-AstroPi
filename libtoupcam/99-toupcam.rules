@@ -1,2 +1,0 @@
-# All ToupCam devices
-SUBSYSTEMS=="usb", ATTR{idVendor}=="0547", MODE="0666"

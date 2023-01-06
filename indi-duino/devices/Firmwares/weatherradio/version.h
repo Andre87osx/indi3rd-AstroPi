@@ -1,1 +1,0 @@
-#define WEATHERRADIO_VERSION "1.15";
